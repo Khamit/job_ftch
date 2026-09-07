@@ -15,8 +15,16 @@ from job_ftch.infrastructure.sources.career_site import client_for_config
 from job_ftch.infrastructure.sources.raw_item_factory import build_raw_item
 from job_ftch.infrastructure.sources.site_parsers.base import SiteRuntimeDefaults
 from job_ftch.infrastructure.sources.site_parsers.helpers import (
+    DEFAULT_LISTING_MAX_PAGES,
+    ListingPagination,
     browser_scroll_collect_urls,
+    distinctive_search_tokens,
+    keywords_from_spec,
+    normalize_search_keywords,
+    paginate_listing,
     resolve_browser_config,
+    text_matches_keywords,
+    with_query_params,
 )
 
 if TYPE_CHECKING:
@@ -26,25 +34,20 @@ if TYPE_CHECKING:
     from job_ftch.domain.source_spec import CareerSiteSpec
 
 
-async def _parse_detail_board(
-    spec: CareerSiteSpec,
-    client: Any,
-    *,
+def _listing_cards_from_html(
+    html: str,
+    board_url: str,
     href_pattern: re.Pattern[str],
-    parser_name: str,
-    company: str | None = None,
-) -> AsyncIterator[RawItem]:
-    response = await client.get(spec.url, follow_redirects=True)
-    response.raise_for_status()
-    page = LexborHTMLParser(response.text)
+) -> list[tuple[str, str]]:
+    page = LexborHTMLParser(html)
+    cards: list[tuple[str, str]] = []
     seen: set[str] = set()
-    emitted = 0
     for anchor in page.css("a[href]"):
         href = str(anchor.attributes.get("href") or "").strip()
-        url = urljoin(spec.url, href)
+        url = urljoin(board_url, href)
         if not href_pattern.search(url) or url in seen:
             continue
-        if url.rstrip("/") == spec.url.rstrip("/"):
+        if url.rstrip("/") == board_url.rstrip("/"):
             continue
         if url.rsplit("/", 1)[-1].split("?", 1)[0].casefold() in {
             "about",
@@ -57,16 +60,52 @@ async def _parse_detail_board(
         seen.add(url)
         text = anchor.parent.text(separator="\n", strip=True) if anchor.parent else anchor.text()
         text = "\n".join(part.strip() for part in text.splitlines() if part.strip())
+        cards.append((url, text))
+    return cards
+
+
+async def _parse_detail_board(
+    spec: CareerSiteSpec,
+    client: Any,
+    *,
+    href_pattern: re.Pattern[str],
+    parser_name: str,
+    company: str | None = None,
+    fetch_details: bool = True,
+) -> AsyncIterator[RawItem]:
+    async def fetch(url: str) -> str:
+        response = await client.get(url, follow_redirects=True)
+        response.raise_for_status()
+        return str(response.text)
+
+    def extract(html: str, url: str) -> list[tuple[str, str]]:
+        return _listing_cards_from_html(html, url, href_pattern)
+
+    cards = await paginate_listing(
+        fetch,
+        extract,
+        spec.url,
+        limit=spec.limit or 50,
+        pagination=ListingPagination(),
+        identity=lambda card: card[0],
+    )
+    keywords = keywords_from_spec(spec)
+    emitted = 0
+    for url, text in cards:
         if len(text) < 3:
+            continue
+        if not text_matches_keywords(f"{url}\n{text}", keywords):
             continue
         match = href_pattern.search(url)
         external_id = match.group(1) if match and match.lastindex else url
-        try:
-            detail_response = await client.get(url, follow_redirects=True)
-            detail_response.raise_for_status()
-            detail = _extract_detail_text(detail_response.text)
-        except (OSError, RuntimeError, ValueError):
-            detail = ""
+        detail = ""
+        if fetch_details:
+            try:
+                detail_response = await client.get(url, follow_redirects=True)
+                detail_response.raise_for_status()
+                detail = _extract_detail_text(detail_response.text)
+            except (OSError, RuntimeError, ValueError):
+                detail = ""
         if detail and detail.casefold() not in text.casefold():
             text = f"{text}\n{detail}"
         try:
@@ -101,17 +140,21 @@ async def _discover_detail_board(
 ) -> list[str]:
     limit = spec.limit or 50
     try:
-        response = await client.get(spec.url, follow_redirects=True)
-        response.raise_for_status()
-        page = LexborHTMLParser(response.text)
-        urls = list(
-            dict.fromkeys(
-                urljoin(spec.url, str(anchor.attributes.get("href") or "").strip())
-                for anchor in page.css("a[href]")
-                if href_pattern.search(
-                    urljoin(spec.url, str(anchor.attributes.get("href") or "").strip())
-                )
-            )
+
+        async def fetch(url: str) -> str:
+            response = await client.get(url, follow_redirects=True)
+            response.raise_for_status()
+            return str(response.text)
+
+        def extract(html: str, url: str) -> list[str]:
+            return [card[0] for card in _listing_cards_from_html(html, url, href_pattern)]
+
+        urls = await paginate_listing(
+            fetch,
+            extract,
+            spec.url,
+            limit=limit,
+            pagination=ListingPagination(),
         )
         if urls:
             return urls[:limit]
@@ -130,6 +173,12 @@ async def _discover_detail_board(
             scroll_loops=5,
             pause_sec=0.5,
         )
+
+
+def _plain_html(value: object) -> str:
+    if not isinstance(value, str) or not value:
+        return ""
+    return " ".join(LexborHTMLParser(value).text(separator=" ", strip=True).split())
 
 
 def _extract_detail_text(html: str) -> str:
@@ -160,7 +209,11 @@ class YadroParser:
 
     def runtime_defaults(self, url: str) -> SiteRuntimeDefaults:
         del url
-        return SiteRuntimeDefaults(render=False, wait="domcontentloaded")
+        return SiteRuntimeDefaults(
+            render=False,
+            wait="domcontentloaded",
+            extra={"skip_ssl": True},
+        )
 
     def parser_kind(self, url: str) -> str | None:
         del url
@@ -182,46 +235,117 @@ class YadroParser:
             yield item
 
 
+_VTB_DETAIL_RE = re.compile(r"/career/(\d+)(?:/)?$")
+_VTB_LISTING_RE = re.compile(r"rabota-vtb\.ru/career(?:/?(?:\?|$))", re.IGNORECASE)
+
+
+def _vtb_has_detail_links(html: str, base_url: str) -> bool:
+    page = LexborHTMLParser(html)
+    return any(
+        _VTB_DETAIL_RE.search(urljoin(base_url, str(anchor.attributes.get("href") or "").strip()))
+        for anchor in page.css("a[href]")
+    )
+
+
+def _vtb_listing_fallbacks(html: str, base_url: str) -> list[str]:
+    seen: set[str] = set()
+    urls: list[str] = []
+    for anchor in LexborHTMLParser(html).css("a[href]"):
+        href = urljoin(base_url, str(anchor.attributes.get("href") or "").strip()).split("#", 1)[0]
+        if not _VTB_LISTING_RE.search(href) or _VTB_DETAIL_RE.search(href):
+            continue
+        if href in seen:
+            continue
+        seen.add(href)
+        urls.append(href)
+    return urls
+
+
+async def _vtb_listing_spec(spec: CareerSiteSpec, client: Any) -> CareerSiteSpec:
+    """Follow the IT landing page through to the numeric career listing."""
+    response = await client.get(spec.url, follow_redirects=True)
+    response.raise_for_status()
+    html = response.text
+    current_url = str(getattr(response, "url", spec.url) or spec.url)
+    if _vtb_has_detail_links(html, current_url):
+        return spec
+    for listing_url in _vtb_listing_fallbacks(html, current_url):
+        listing_spec = spec.model_copy(update={"url": listing_url})
+        listing_response = await client.get(listing_url, follow_redirects=True)
+        listing_response.raise_for_status()
+        listing_html_url = str(getattr(listing_response, "url", listing_url) or listing_url)
+        if _vtb_has_detail_links(listing_response.text, listing_html_url):
+            return listing_spec
+    return spec
+
+
 class VtbParser:
     domain_pattern = r"^https?://(?:rabota\.vtb\.ru|rabota-vtb\.ru)(?:/|$)"
     has_custom_parse = True
-    supports_discover = True
-
-    def runtime_defaults(self, url: str) -> SiteRuntimeDefaults:
-        del url
-        return SiteRuntimeDefaults(render=False, wait="domcontentloaded")
-
-    def parser_kind(self, url: str) -> str | None:
-        del url
-        return None
-
-    async def discover(self, spec: CareerSiteSpec, client: Any) -> list[str]:
-        return await _discover_detail_board(
-            spec, client, href_pattern=re.compile(r"/career/(\d+)(?:/)?$")
-        )
-
-    async def parse(self, spec: CareerSiteSpec, client: Any) -> AsyncIterator[RawItem]:
-        async for item in _parse_detail_board(
-            spec,
-            client,
-            href_pattern=re.compile(r"/career/(\d+)(?:/)?$"),
-            parser_name="vtb_board",
-            company="ВТБ",
-        ):
-            yield item
-
-
-class AlfaBankParser:
-    domain_pattern = r"^https?://(?:(?:job|digital)\.)?alfabank\.ru(?:/|$)"
-    has_custom_parse = True
     supports_discover = False
+    confirmed_empty_on_empty = True
 
     def runtime_defaults(self, url: str) -> SiteRuntimeDefaults:
         del url
         return SiteRuntimeDefaults(
             render=False,
             wait="domcontentloaded",
-            extra={"proxy_rescue_allow_domains": ["job.alfabank.ru"]},
+            extra={
+                "skip_ssl": True,
+                "proxy_rescue_allow_domains": ["rabota.vtb.ru", "rabota-vtb.ru"],
+            },
+        )
+
+    def parser_kind(self, url: str) -> str | None:
+        del url
+        return None
+
+    async def discover(self, spec: CareerSiteSpec, client: Any) -> list[str]:
+        async with client_for_config(client, spec.monitor_config) as scoped:
+            listing_spec = await _vtb_listing_spec(spec, scoped)
+            return await _discover_detail_board(listing_spec, scoped, href_pattern=_VTB_DETAIL_RE)
+
+    async def parse(self, spec: CareerSiteSpec, client: Any) -> AsyncIterator[RawItem]:
+        async with client_for_config(client, spec.monitor_config) as scoped:
+            listing_spec = await _vtb_listing_spec(spec, scoped)
+            async for item in _parse_detail_board(
+                listing_spec,
+                scoped,
+                href_pattern=_VTB_DETAIL_RE,
+                parser_name="vtb_board",
+                company="ВТБ",
+            ):
+                yield item
+
+
+class AlfaBankParser:
+    domain_pattern = r"^https?://(?:(?:job|digital)\.)?alfabank\.ru(?:/|$)"
+    has_custom_parse = True
+    supports_discover = False
+    supports_search = True
+    search_mode = "combined"
+    confirmed_empty_on_empty = True
+    terminal_on_error = True
+    _API_URL = "https://job.alfabank.ru/api/vacancies"
+    _LISTING_URL = "https://job.alfabank.ru/vacancies"
+
+    def build_search_urls(
+        self, base_url: str, keywords: Any, *, limit: int | None = None
+    ) -> list[str]:
+        del base_url, limit
+        if not normalize_search_keywords(keywords):
+            return []
+        return [self._LISTING_URL]
+
+    def runtime_defaults(self, url: str) -> SiteRuntimeDefaults:
+        del url
+        return SiteRuntimeDefaults(
+            render=False,
+            wait="domcontentloaded",
+            extra={
+                "proxy_rescue_allow_domains": ["job.alfabank.ru"],
+                "skip_ssl": True,
+            },
         )
 
     def parser_kind(self, url: str) -> str | None:
@@ -230,45 +354,77 @@ class AlfaBankParser:
 
     async def parse(self, spec: CareerSiteSpec, client: Any) -> AsyncIterator[RawItem]:
         limit = spec.limit or 50
-        params = [("businessLine", str(value)) for value in range(1011, 1023)]
-        response = await client.get(
-            "https://job.alfabank.ru/api/vacancies",
-            params=[*params, ("take", str(limit))],
-            follow_redirects=True,
-        )
-        response.raise_for_status()
-        for vacancy in response.json().get("items", [])[:limit]:
-            title = str(vacancy.get("name") or "").strip()
-            slug = str(vacancy.get("slug") or "").strip()
-            if not title or not slug:
-                continue
-            text = "\n".join(
-                filter(
-                    None,
-                    (
-                        title,
-                        str(vacancy.get("descriptionText") or "").strip(),
-                        str(vacancy.get("requirements") or "").strip(),
-                        str(vacancy.get("duties") or "").strip(),
-                        str(vacancy.get("conditions") or "").strip(),
-                    ),
-                )
-            )
-            yield build_raw_item(
-                source_kind=SourceKind.CAREER_SITE,
-                source_name=spec.source_name or "alfabank_api",
-                external_id=str(vacancy.get("id") or slug),
-                url=urljoin("https://job.alfabank.ru", slug),
-                text=text,
-                metadata={
-                    "board_url": spec.url,
-                    "parser": "alfabank_api",
-                    "observation_kind": "vacancy_detail",
-                    "detail_vacancy_confirmed": True,
-                    "company": "Альфа-Банк",
-                    "company_authoritative": True,
-                },
-            )
+        keywords = keywords_from_spec(spec)
+        queries: list[str | None] = [*distinctive_search_tokens(keywords)] or [None]
+        page_size = min(50, max(limit, 1))
+        seen: set[str] = set()
+        emitted = 0
+        async with client_for_config(client, spec.monitor_config) as scoped:
+            for query in queries:
+                skip = 0
+                for _page in range(DEFAULT_LISTING_MAX_PAGES):
+                    params: dict[str, Any] = {"take": str(page_size), "skip": str(skip)}
+                    if query:
+                        params["text"] = query
+                    response = await scoped.get(
+                        self._API_URL,
+                        params=params,
+                        follow_redirects=True,
+                    )
+                    response.raise_for_status()
+                    payload = response.json()
+                    vacancies = payload.get("items", []) if isinstance(payload, dict) else []
+                    if not isinstance(vacancies, list) or not vacancies:
+                        break
+                    for vacancy in vacancies:
+                        if not isinstance(vacancy, dict):
+                            continue
+                        title = str(vacancy.get("name") or "").strip()
+                        slug = str(vacancy.get("slug") or "").strip()
+                        if not title or not slug:
+                            continue
+                        external_id = str(vacancy.get("id") or slug)
+                        if external_id in seen:
+                            continue
+                        seen.add(external_id)
+                        text = "\n".join(
+                            filter(
+                                None,
+                                (
+                                    title,
+                                    str(vacancy.get("descriptionText") or "").strip(),
+                                    str(vacancy.get("requirements") or "").strip(),
+                                    str(vacancy.get("duties") or "").strip(),
+                                    str(vacancy.get("conditions") or "").strip(),
+                                ),
+                            )
+                        )
+                        if not text_matches_keywords(text, keywords):
+                            continue
+                        yield build_raw_item(
+                            source_kind=SourceKind.CAREER_SITE,
+                            source_name=spec.source_name or "alfabank_api",
+                            external_id=external_id,
+                            url=urljoin("https://job.alfabank.ru", slug),
+                            text=text,
+                            metadata={
+                                "board_url": spec.url,
+                                "parser": "alfabank_api",
+                                "observation_kind": "vacancy_detail",
+                                "detail_vacancy_confirmed": True,
+                                "company": "Альфа-Банк",
+                                "company_authoritative": True,
+                            },
+                        )
+                        emitted += 1
+                        if emitted >= limit:
+                            return
+                    skip += page_size
+                    if len(vacancies) < page_size:
+                        break
+                    total = payload.get("total") if isinstance(payload, dict) else None
+                    if isinstance(total, int) and skip >= total:
+                        break
 
 
 class T1InnotechParser:
@@ -353,6 +509,89 @@ class RostelecomCareerParser(_EmployerBoardParser):
     parser_name = "rostelecom_career"
     company = "Ростелеком"
     detail_pattern = re.compile(r"/search/([^/?#]+)(?:/)?$")
+    supports_discover = False
+    supports_search = True
+    search_mode = "combined"
+    confirmed_empty_on_empty = True
+    _API_URL = "https://job.rt.ru/backend/api/vacancies"
+    _LISTING_URL = "https://job.rt.ru/search"
+
+    def build_search_urls(
+        self, base_url: str, keywords: Any, *, limit: int | None = None
+    ) -> list[str]:
+        del base_url, limit
+        if not normalize_search_keywords(keywords):
+            return []
+        return [self._LISTING_URL]
+
+    def runtime_defaults(self, url: str) -> SiteRuntimeDefaults:
+        del url
+        return SiteRuntimeDefaults(render=False, wait="domcontentloaded")
+
+    async def parse(self, spec: CareerSiteSpec, client: Any) -> AsyncIterator[RawItem]:
+        keywords = keywords_from_spec(spec)
+        limit = spec.limit or 50
+        seen: set[str] = set()
+        emitted = 0
+        max_pages = 20
+        for page in range(1, max_pages + 1):
+            response = await client.get(
+                self._API_URL,
+                params={"page": str(page)},
+                headers={"Accept": "application/json", "Referer": self._LISTING_URL},
+                follow_redirects=True,
+            )
+            response.raise_for_status()
+            payload = response.json()
+            vacancies = payload.get("vacancies") if isinstance(payload, dict) else None
+            if not isinstance(vacancies, list) or not vacancies:
+                return
+            for row in vacancies:
+                if not isinstance(row, dict):
+                    continue
+                vacancy_id = row.get("id")
+                title = str(row.get("name") or "").strip()
+                if not vacancy_id or not title:
+                    continue
+                external_id = str(vacancy_id)
+                if external_id in seen:
+                    continue
+                seen.add(external_id)
+                city = row.get("city")
+                city_name = city.get("name") if isinstance(city, dict) else None
+                text = "\n".join(
+                    part
+                    for part in (
+                        title,
+                        str(city_name or "").strip(),
+                        _plain_html(row.get("whatWeToDo")),
+                        _plain_html(row.get("whatWeExpect")),
+                        _plain_html(row.get("whatWeOffer")),
+                    )
+                    if part
+                )
+                if not text_matches_keywords(text, keywords):
+                    continue
+                yield build_raw_item(
+                    source_kind=SourceKind.CAREER_SITE,
+                    source_name=spec.source_name or self.parser_name,
+                    external_id=external_id,
+                    url=f"{self._LISTING_URL}/{external_id}",
+                    text=text,
+                    metadata={
+                        "board_url": spec.url,
+                        "parser": self.parser_name,
+                        "company": self.company,
+                        "company_authoritative": True,
+                        "detail_vacancy_confirmed": True,
+                    },
+                )
+                emitted += 1
+                if emitted >= limit:
+                    return
+            total_pages = payload.get("totalPages") if isinstance(payload, dict) else None
+            if isinstance(total_pages, int) and page >= total_pages:
+                return
 
 
 class MegafonCareerParser(_EmployerBoardParser):
@@ -396,10 +635,26 @@ class SelectelCareerParser(_EmployerBoardParser):
 
 
 class X5TechCareerParser(_EmployerBoardParser):
-    domain_pattern = r"^https?://rabota\.x5\.ru/vacancies(?:[/?#]|$)"
+    domain_pattern = r"^https?://(?:rabota\.x5\.ru/vacancies|x5-tech\.ru/career)(?:[/?#]|$)"
     parser_name = "x5_tech_career"
     company = "X5 Tech"
     detail_pattern = re.compile(r"/vacancies/([0-9a-f-]{36})(?:/)?$", re.IGNORECASE)
+    supports_search = True
+    search_mode = "per_keyword"
+
+    def build_search_urls(
+        self,
+        base_url: str,
+        keywords: Any,
+        *,
+        limit: int | None = None,
+    ) -> list[str]:
+        del limit
+        terms = normalize_search_keywords(keywords)
+        if not terms:
+            return []
+        listing = base_url.split("?", 1)[0]
+        return [with_query_params(listing, {"search": term}) for term in terms]
 
 
 class CsbiCareerParser(_EmployerBoardParser):
@@ -416,10 +671,77 @@ class CasibCareerParser(_EmployerBoardParser):
 
 
 class HalykCareerParser(_EmployerBoardParser):
-    domain_pattern = r"^https?://(?:www\.)?halykbank\.kz/(?:[a-z]{2}/)?(?:index\.php/)?about/career/vacancies(?:/|$)"
+    domain_pattern = r"^https?://(?:www\.)?halykbank\.kz(?:/|$)"
     parser_name = "halyk_career"
     company = "Halyk Bank"
     detail_pattern = re.compile(r"/(?:[a-z]{2}/)?about/career/vacancies-inner/(\d+)(?:/)?$")
+    supports_discover = False
+    supports_search = True
+    search_mode = "combined"
+    confirmed_empty_on_empty = True
+
+    def runtime_defaults(self, url: str) -> SiteRuntimeDefaults:
+        del url
+        return SiteRuntimeDefaults(render=False, wait="domcontentloaded")
+
+    def build_search_urls(
+        self, base_url: str, keywords: Any, *, limit: int | None = None
+    ) -> list[str]:
+        del limit
+        if not normalize_search_keywords(keywords):
+            return []
+        return [urljoin(base_url, "/about/career/vacancies")]
+
+    @staticmethod
+    def _listing_spec(spec: CareerSiteSpec) -> CareerSiteSpec:
+        if re.search(r"about/career/vacancies", spec.url, re.IGNORECASE):
+            return spec
+        return spec.model_copy(update={"url": urljoin(spec.url, "/about/career/vacancies")})
+
+    async def parse(self, spec: CareerSiteSpec, client: Any) -> AsyncIterator[RawItem]:
+        listing_spec = self._listing_spec(spec)
+        keywords = keywords_from_spec(spec)
+        limit = spec.limit or 50
+
+        async def fetch(url: str) -> str:
+            response = await client.get(url, follow_redirects=True)
+            response.raise_for_status()
+            return str(response.text)
+
+        def extract(html: str, url: str) -> list[tuple[str, str]]:
+            return _listing_cards_from_html(html, url, self.detail_pattern)
+
+        cards = await paginate_listing(
+            fetch,
+            extract,
+            listing_spec.url,
+            limit=limit,
+            pagination=ListingPagination(),
+            identity=lambda card: card[0],
+        )
+        emitted = 0
+        for url, text in cards:
+            if len(text) < 3 or not text_matches_keywords(f"{url}\n{text}", keywords):
+                continue
+            match = self.detail_pattern.search(url)
+            external_id = match.group(1) if match and match.lastindex else url
+            yield build_raw_item(
+                source_kind=SourceKind.CAREER_SITE,
+                source_name=spec.source_name or self.parser_name,
+                external_id=external_id,
+                url=url,
+                text=text,
+                metadata={
+                    "board_url": spec.url,
+                    "parser": self.parser_name,
+                    "company": self.company,
+                    "company_authoritative": True,
+                    "detail_vacancy_confirmed": False,
+                },
+            )
+            emitted += 1
+            if emitted >= limit:
+                return
 
 
 class FreedomCareerParser(_EmployerBoardParser):
@@ -438,6 +760,20 @@ class BeelineKazakhstanCareerParser(_EmployerBoardParser):
     domain_pattern = r"^https?://people\.beeline\.kz(?:/|$)"
     parser_name = "beeline_kz_career"
     company = "Beeline Kazakhstan"
+    supports_discover = False
+    confirmed_empty_on_empty = True
+
+    def runtime_defaults(self, url: str) -> SiteRuntimeDefaults:
+        del url
+        return SiteRuntimeDefaults(render=False, wait="domcontentloaded")
+
+    async def parse(self, spec: CareerSiteSpec, client: Any) -> AsyncIterator[RawItem]:
+        # OutSystems shell has no public listing. Do not fall through to a browser.
+        response = await client.get(spec.url, follow_redirects=True)
+        response.raise_for_status()
+        del response
+        return
+        yield  # pragma: no cover
 
 
 class TochkaCareerParser(_EmployerBoardParser):

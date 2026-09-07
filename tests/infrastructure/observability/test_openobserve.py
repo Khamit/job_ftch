@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import json
 import logging
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 from structlog.contextvars import bind_contextvars, reset_contextvars
 
@@ -11,9 +13,28 @@ from job_ftch.infrastructure.observability.openobserve import (
     _ContextAttributesFilter,
     _counter_mapping,
     _counter_value,
+    _resolve_openobserve_url,
     _runtime_state_snapshots,
     record_runtime_state_metrics,
 )
+
+
+def test_openobserve_url_rejects_non_http_schemes() -> None:
+    import pytest
+
+    assert _resolve_openobserve_url("https://observe.example/") == "https://observe.example"
+    with pytest.raises(ValueError, match="http or https"):
+        _resolve_openobserve_url("file:///tmp/dashboard")
+
+
+def test_openobserve_dashboard_copies_match_and_panels_have_descriptions() -> None:
+    root = Path(__file__).parents[3]
+    packaged = root / "job_ftch/infrastructure/observability/dashboards/job_ftch_ingest.json"
+    deploy = root / "deploy/observability/dashboards/job_ftch_ingest.json"
+
+    assert packaged.read_bytes() == deploy.read_bytes()
+    dashboard = json.loads(packaged.read_text(encoding="utf-8"))
+    assert all(panel.get("description") for tab in dashboard["tabs"] for panel in tab["panels"])
 
 
 def test_context_filter_promotes_only_safe_correlation_fields() -> None:
@@ -91,5 +112,8 @@ def test_runtime_state_metrics_snapshot_exposes_source_and_publish_state(monkeyp
 
     assert _runtime_state_snapshots["job_ftch.source.health.degraded"][0][0] == 1.0
     assert _runtime_state_snapshots["job_ftch.source.health.failure_streak"][0][0] == 2.0
+    assert _runtime_state_snapshots["job_ftch.source.quality.reliable"][0][0] == 0.0
+    assert _runtime_state_snapshots["job_ftch.source.quality.high_relevance"][0][0] == 0.0
+    assert _runtime_state_snapshots["job_ftch.source.quality.important"][0][0] == 0.0
     assert _runtime_state_snapshots["job_ftch.bot.scheduler.publish_error_present"][0][0] == 1.0
     assert _runtime_state_snapshots["job_ftch.bot.scheduler.last_publish_sent"][0][0] == 7.0

@@ -124,27 +124,33 @@ async def test_generic_source_defaults_exclude_geekjob_and_superjob_listing_page
 def test_protected_parser_defaults_declare_only_authorized_domains() -> None:
     from job_ftch.infrastructure.sources.site_defaults import apply_runtime_defaults
 
-    for url in (
-        "https://jobs.ashbyhq.com/example",
-        "https://careers.higgsfield.kz/",
-        "https://job.beeline.ru/vacancies",
-    ):
-        config = apply_runtime_defaults(CareerSiteSpec(url=url)).monitor_config
-        assert config["captcha_authorized_domains"] == [
-            "jobs.ashbyhq.com",
-            "careers.higgsfield.kz",
-            "job.beeline.ru",
-        ]
-        assert config["proxy_rescue_allow_domains"] == config["captcha_authorized_domains"]
+    ashby = apply_runtime_defaults(CareerSiteSpec(url="https://jobs.ashbyhq.com/example"))
+    assert ashby.monitor_config["captcha_authorized_domains"] == ["jobs.ashbyhq.com"]
+    assert ashby.monitor_config["proxy_rescue_allow_domains"] == ["jobs.ashbyhq.com"]
 
     beeline = apply_runtime_defaults(CareerSiteSpec(url="https://job.beeline.ru/vacancies"))
     assert beeline.monitor_config["proxy_geo"] == "RU"
+    assert "hh.ru" in beeline.monitor_config["proxy_rescue_allow_domains"]
+    assert beeline.monitor_config.get("render") is False
+
+    higgsfield = apply_runtime_defaults(CareerSiteSpec(url="https://careers.higgsfield.kz/"))
+    assert higgsfield.monitor_config["captcha_authorized_domains"] == [
+        "careers.higgsfield.kz",
+        "jobs.ashbyhq.com",
+        "api.ashbyhq.com",
+    ]
+    assert higgsfield.monitor_config["proxy_rescue_allow_domains"] == [
+        "careers.higgsfield.kz",
+        "jobs.ashbyhq.com",
+        "api.ashbyhq.com",
+    ]
 
     superjob = apply_runtime_defaults(CareerSiteSpec(url="https://www.superjob.ru/vakansii/"))
     assert superjob.monitor_config["captcha_authorized_domains"] == [
         "www.superjob.ru",
         "superjob.ru",
     ]
+    assert superjob.monitor_config["bypass_capability"] == "cloudflare_challenge"
 
 
 @pytest.mark.asyncio

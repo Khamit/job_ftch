@@ -58,6 +58,43 @@ async def test_large_employer_parser_discovers_details_for_core_enrichment() -> 
     assert urls == ["https://careers.yadro.com/vacancy/102472"]
 
 
+def test_vtb_runtime_defaults_relax_tls_and_admit_proxy_host() -> None:
+    from job_ftch.infrastructure.sources.site_defaults import apply_runtime_defaults
+
+    spec = apply_runtime_defaults(CareerSiteSpec(url="https://rabota.vtb.ru/career-it/"))
+    assert spec.monitor_config["skip_ssl"] is True
+    assert spec.monitor_config["proxy_rescue_allow_domains"] == [
+        "rabota.vtb.ru",
+        "rabota-vtb.ru",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_vtb_parser_follows_it_landing_to_numeric_career_listing() -> None:
+    class LandingClient:
+        async def get(self, url: str, **_: object) -> _Response:
+            response = _Response()
+            if "career-it" in url:
+                response.text = (
+                    '<a href="https://rabota-vtb.ru/career?department=vtb-4181-teh">'
+                    "Откликнуться на вакансии</a>"
+                )
+            elif url.rstrip("/").endswith("/career") or "department=" in url:
+                response.text = '<a href="/career/134519550">Data Engineer</a>'
+            else:
+                response.text = "<main><h1>Data Engineer</h1></main>"
+            return response
+
+    items = [
+        item
+        async for item in VtbParser().parse(
+            CareerSiteSpec(url="https://rabota.vtb.ru/career-it/", limit=5),
+            LandingClient(),
+        )
+    ]
+    assert [item.external_id for item in items] == ["134519550"]
+
+
 @pytest.mark.asyncio
 async def test_vtb_parser_accepts_numeric_career_detail_url() -> None:
     response = _Response()
@@ -124,7 +161,11 @@ async def test_employer_parser_skips_landing_and_policy_pages() -> None:
 @pytest.mark.asyncio
 async def test_alfa_parser_uses_company_api() -> None:
     class AlfaClient:
-        async def get(self, url: str, **_: object) -> _Response:
+        def __init__(self) -> None:
+            self.params: list[object] = []
+
+        async def get(self, url: str, **kwargs: object) -> _Response:
+            self.params.append(kwargs.get("params"))
             response = _Response()
             response.json = lambda: {
                 "items": [
@@ -138,17 +179,28 @@ async def test_alfa_parser_uses_company_api() -> None:
             }
             return response
 
+    client = AlfaClient()
     items = [
         item
         async for item in AlfaBankParser().parse(
             CareerSiteSpec(url="https://digital.alfabank.ru/vacancies", limit=1),
-            AlfaClient(),
+            client,
         )
     ]
 
     assert [item.external_id for item in items] == ["105584"]
     assert "Design banking APIs" in items[0].text
     assert items[0].metadata["company"] == "Альфа-Банк"
+    assert client.params
+    assert "businessLine" not in str(client.params[0])
+    assert "take" in str(client.params[0])
+
+
+def test_alfa_runtime_defaults_relax_tls() -> None:
+    from job_ftch.infrastructure.sources.site_defaults import apply_runtime_defaults
+
+    spec = apply_runtime_defaults(CareerSiteSpec(url="https://job.alfabank.ru/vacancies"))
+    assert spec.monitor_config["skip_ssl"] is True
 
 
 @pytest.mark.asyncio
