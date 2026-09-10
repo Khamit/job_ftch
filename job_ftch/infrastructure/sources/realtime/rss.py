@@ -1,0 +1,174 @@
+"""RSS feed source. Requires feedparser (pip install feedparser) — optional dep."""
+
+from __future__ import annotations
+
+import asyncio
+from datetime import UTC, datetime
+from email.utils import parsedate_to_datetime
+from time import struct_time
+from typing import TYPE_CHECKING, Any, cast
+
+import httpx
+import structlog
+
+from job_ftch.application.registry import register_source_spec
+from job_ftch.application.watermark import IncrementalCursor
+from job_ftch.domain import (
+    AcquisitionTransport,
+    ObservationKind,
+    RawItem,
+    SourceFamily,
+    SourceIdentity,
+    SourceKind,
+)
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
+
+    from job_ftch.application.contracts import AuthProvider, Store, StoreConnector
+    from job_ftch.domain import QuarantinedRawItem
+    from job_ftch.domain.source_spec import RSSFeedSourceSpec
+
+logger = structlog.get_logger(__name__)
+
+try:
+    import feedparser
+
+    _FEEDPARSER_AVAILABLE = True
+except ImportError:
+    feedparser = None  # type: ignore[assignment]
+    _FEEDPARSER_AVAILABLE = False
+
+
+def _entry_published_at(entry: dict[str, Any]) -> datetime | None:
+    for key in ("published_parsed", "updated_parsed"):
+        value = entry.get(key)
+        if isinstance(value, struct_time):
+            return datetime(*value[:6], tzinfo=UTC)
+    for key in ("published", "updated"):
+        raw_value = entry.get(key)
+        if not raw_value:
+            continue
+        try:
+            parsed = parsedate_to_datetime(str(raw_value))
+        except (TypeError, ValueError, IndexError):
+            continue
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=UTC)
+        return parsed.astimezone(UTC)
+    return None
+
+
+class RSSFeedSource:
+    """HTTP-poll RSS/Atom feed. Incremental: skips already-seen entry IDs."""
+
+    def __init__(
+        self,
+        spec: RSSFeedSourceSpec,
+        auth: AuthProvider,
+        store: Store | None = None,
+    ) -> None:
+        self.spec = spec
+        self.auth = auth
+        self.store = store
+        self.source_name = spec.source_name or str(spec.feed_url)
+        self._cursor_source_id = f"rss:{self.source_name}"
+
+    async def fetch(self) -> AsyncIterator[RawItem | QuarantinedRawItem]:
+        if not _FEEDPARSER_AVAILABLE:
+            raise ImportError(
+                "feedparser is required for RSS sources. Install with: uv add feedparser"
+            )
+
+        feed_url = str(self.spec.feed_url)
+
+        # Load seen IDs from store for incremental dedup
+        seen_ids: set[str] = set()
+        if self.spec.incremental and self.store:
+            raw = await IncrementalCursor(cast("StoreConnector", self.store)).get(
+                self._cursor_source_id
+            )
+            if raw:
+                seen_ids = set(raw.split(","))
+
+        # Fetch
+        headers: dict[str, str] = {}
+        from job_ftch.config import get_settings
+        from job_ftch.infrastructure.network.ssrf_guard import SSRFGuardedTransport
+
+        async with httpx.AsyncClient(
+            timeout=get_settings().rss_timeout_seconds,
+            transport=SSRFGuardedTransport(httpx.AsyncHTTPTransport()),
+        ) as client:
+            try:
+                response = await client.get(feed_url, headers=headers)
+                response.raise_for_status()
+                raw_content = response.text
+            except Exception:
+                logger.exception("rss_fetch_failed", url=feed_url)
+                raise
+
+        # Parse in thread pool (feedparser is sync and CPU-bound)
+        loop = asyncio.get_running_loop()
+        feed = await loop.run_in_executor(None, feedparser.parse, raw_content)
+
+        new_ids: list[str] = []
+        cutoff = self.spec.freshness_cutoff_utc
+        normalized_cutoff = (
+            cutoff if cutoff is None or cutoff.tzinfo is not None else cutoff.replace(tzinfo=UTC)
+        )
+        for entry in feed.entries:
+            entry_id = entry.get("id") or entry.get("link") or ""
+            if self.spec.incremental and entry_id in seen_ids:
+                continue
+            if normalized_cutoff is not None:
+                published_at = _entry_published_at(entry)
+                if published_at is None or published_at < normalized_cutoff.astimezone(UTC):
+                    continue
+
+            url = entry.get("link") or entry.get("url") or ""
+            title = entry.get("title") or ""
+            summary = entry.get("summary") or entry.get("description") or ""
+            text = f"{title}\n{summary}".strip() or str(entry)
+            url_str = str(url) if url else None
+
+            yield RawItem(
+                source_kind=SourceKind.CAREER_SITE,
+                source_identity=SourceIdentity(
+                    family=SourceFamily.RSS,
+                    observation_kind=ObservationKind.LISTING,
+                    transport=AcquisitionTransport.HTTP,
+                    adapter="rss_feed",
+                    parser_version="feedparser-v1",
+                    legacy_kind=str(SourceKind.CAREER_SITE),
+                ),
+                source_name=self.source_name,
+                external_id=entry_id,
+                url=url_str,  # type: ignore[arg-type]
+                text=text,
+                metadata={
+                    "title": title,
+                    "summary": summary,
+                    "entry_id": entry_id,
+                    "source_family": SourceFamily.RSS.value,
+                    "observation_kind": "listing",
+                    "detail_url": url_str,
+                },
+            )
+
+            if entry_id:
+                new_ids.append(entry_id)
+
+        # Persist seen IDs
+        if self.spec.incremental and self.store and new_ids:
+            all_seen = seen_ids | set(new_ids)
+            # Keep only last 10000 to avoid unbounded growth
+            trimmed = set(list(all_seen)[-10000:])
+            await IncrementalCursor(cast("StoreConnector", self.store)).set(
+                self._cursor_source_id, ",".join(trimmed)
+            )
+
+
+@register_source_spec("rss_feed")
+def _create_rss(spec: Any, auth: AuthProvider, store: Any = None) -> RSSFeedSource:
+    return RSSFeedSource(spec, auth)

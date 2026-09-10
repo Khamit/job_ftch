@@ -1,0 +1,51 @@
+name: adapter-mcp
+
+on:
+  push:
+    paths:
+      - "job_ftch/adapters/mcp/**"
+      - "docker/local-mcp/**"
+      - "deploy/mcp/**"
+      - "scripts/mcp/**"
+      - "tests/adapters/test_mcp_server.py"
+      - "tests/adapters/test_mcp_unit.py"
+      - "job_ftch/cli.py"
+      - "pyproject.toml"
+  pull_request:
+    paths:
+      - "job_ftch/adapters/mcp/**"
+      - "docker/local-mcp/**"
+      - "deploy/mcp/**"
+      - "scripts/mcp/**"
+      - "tests/adapters/test_mcp_server.py"
+      - "tests/adapters/test_mcp_unit.py"
+      - "job_ftch/cli.py"
+      - "pyproject.toml"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Lint and build images
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+      - name: Set up Python + uv
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
+        with:
+          python-version: "3.12"
+      - name: Install deps (mcp test extras)
+        run: uv sync --extra mcp --extra sqlite --extra openai --extra site-scrapers --extra local-mcp
+        env:
+          JOB_FTCH_LLM_BACKEND: heuristic
+          JOB_FTCH_TRACING_ENABLED: "false"
+      - name: Lint adapter
+        run: uv run ruff check job_ftch/adapters/mcp tests/adapters/test_mcp_server.py tests/adapters/test_mcp_unit.py
+      - name: Module boundaries
+        run: uv run python scripts/check_module_boundaries.py
+      - name: Build minimal MCP image
+        run: docker build -f job_ftch/adapters/mcp/Dockerfile -t job-ftch-mcp .
+      - name: Build local-mcp profile image
+        run: docker build -f docker/local-mcp/Dockerfile -t job-ftch-local-mcp .

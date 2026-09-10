@@ -1,0 +1,1432 @@
+{
+  "$defs": {
+    "BrowserSourceSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "interval_seconds": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Interval Seconds"
+        },
+        "rate_limit_min_interval_seconds": {
+          "default": 0.0,
+          "title": "Rate Limit Min Interval Seconds",
+          "type": "number"
+        },
+        "rate_limit_backoff_multiplier": {
+          "default": 2.0,
+          "title": "Rate Limit Backoff Multiplier",
+          "type": "number"
+        },
+        "ingest_mode": {
+          "default": "polling",
+          "title": "Ingest Mode",
+          "type": "string"
+        },
+        "bypass": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Bypass"
+        },
+        "bypass_config": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Bypass Config",
+          "type": "object"
+        },
+        "type": {
+          "const": "browser",
+          "default": "browser",
+          "title": "Type",
+          "type": "string"
+        },
+        "url": {
+          "format": "uri",
+          "minLength": 1,
+          "title": "Url",
+          "type": "string"
+        },
+        "parser": {
+          "default": "generic",
+          "title": "Parser",
+          "type": "string"
+        },
+        "source_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Name"
+        }
+      },
+      "required": [
+        "url"
+      ],
+      "title": "BrowserSourceSpec",
+      "type": "object"
+    },
+    "CareerSiteSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "interval_seconds": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Interval Seconds"
+        },
+        "rate_limit_min_interval_seconds": {
+          "default": 0.0,
+          "title": "Rate Limit Min Interval Seconds",
+          "type": "number"
+        },
+        "rate_limit_backoff_multiplier": {
+          "default": 2.0,
+          "title": "Rate Limit Backoff Multiplier",
+          "type": "number"
+        },
+        "ingest_mode": {
+          "default": "polling",
+          "title": "Ingest Mode",
+          "type": "string"
+        },
+        "bypass": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Bypass"
+        },
+        "bypass_config": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Bypass Config",
+          "type": "object"
+        },
+        "type": {
+          "const": "career_site",
+          "default": "career_site",
+          "title": "Type",
+          "type": "string"
+        },
+        "url": {
+          "minLength": 1,
+          "title": "Url",
+          "type": "string"
+        },
+        "limit": {
+          "default": 100,
+          "exclusiveMinimum": 0,
+          "title": "Limit",
+          "type": "integer"
+        },
+        "source_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Name"
+        },
+        "monitor": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": "auto",
+          "title": "Monitor"
+        },
+        "monitor_config": {
+          "additionalProperties": true,
+          "title": "Monitor Config",
+          "type": "object"
+        },
+        "scraper": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Scraper"
+        },
+        "scraper_config": {
+          "additionalProperties": true,
+          "title": "Scraper Config",
+          "type": "object"
+        },
+        "scraper_fallback": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Scraper Fallback",
+          "type": "array"
+        },
+        "detail_limit": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Detail Limit"
+        },
+        "url_filter": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Url Filter"
+        },
+        "url_transform": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Url Transform"
+        }
+      },
+      "required": [
+        "url"
+      ],
+      "title": "CareerSiteSpec",
+      "type": "object"
+    },
+    "CursorPagination": {
+      "properties": {
+        "type": {
+          "const": "cursor",
+          "default": "cursor",
+          "title": "Type",
+          "type": "string"
+        },
+        "cursor_param": {
+          "title": "Cursor Param",
+          "type": "string"
+        },
+        "next_cursor_path": {
+          "title": "Next Cursor Path",
+          "type": "string"
+        }
+      },
+      "required": [
+        "cursor_param",
+        "next_cursor_path"
+      ],
+      "title": "CursorPagination",
+      "type": "object"
+    },
+    "DeclarativeHtmlSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "interval_seconds": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Interval Seconds"
+        },
+        "rate_limit_min_interval_seconds": {
+          "default": 0.0,
+          "title": "Rate Limit Min Interval Seconds",
+          "type": "number"
+        },
+        "rate_limit_backoff_multiplier": {
+          "default": 2.0,
+          "title": "Rate Limit Backoff Multiplier",
+          "type": "number"
+        },
+        "ingest_mode": {
+          "default": "polling",
+          "title": "Ingest Mode",
+          "type": "string"
+        },
+        "bypass": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Bypass"
+        },
+        "bypass_config": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Bypass Config",
+          "type": "object"
+        },
+        "type": {
+          "const": "declarative_html",
+          "default": "declarative_html",
+          "title": "Type",
+          "type": "string"
+        },
+        "url": {
+          "minLength": 1,
+          "title": "Url",
+          "type": "string"
+        },
+        "parser_kind": {
+          "default": "auto",
+          "title": "Parser Kind",
+          "type": "string"
+        },
+        "limit": {
+          "default": 100,
+          "exclusiveMinimum": 0,
+          "title": "Limit",
+          "type": "integer"
+        },
+        "source_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Name"
+        }
+      },
+      "required": [
+        "url"
+      ],
+      "title": "DeclarativeHtmlSpec",
+      "type": "object"
+    },
+    "LeverSourceSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "interval_seconds": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Interval Seconds"
+        },
+        "rate_limit_min_interval_seconds": {
+          "default": 0.0,
+          "title": "Rate Limit Min Interval Seconds",
+          "type": "number"
+        },
+        "rate_limit_backoff_multiplier": {
+          "default": 2.0,
+          "title": "Rate Limit Backoff Multiplier",
+          "type": "number"
+        },
+        "ingest_mode": {
+          "default": "polling",
+          "title": "Ingest Mode",
+          "type": "string"
+        },
+        "bypass": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Bypass"
+        },
+        "bypass_config": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Bypass Config",
+          "type": "object"
+        },
+        "type": {
+          "const": "lever",
+          "default": "lever",
+          "title": "Type",
+          "type": "string"
+        },
+        "company": {
+          "description": "Lever company slug, e.g. 'acme'",
+          "minLength": 1,
+          "title": "Company",
+          "type": "string"
+        },
+        "source_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Name"
+        }
+      },
+      "required": [
+        "company"
+      ],
+      "title": "LeverSourceSpec",
+      "type": "object"
+    },
+    "LinkHeaderPagination": {
+      "properties": {
+        "type": {
+          "const": "link_header",
+          "default": "link_header",
+          "title": "Type",
+          "type": "string"
+        },
+        "rel": {
+          "default": "next",
+          "title": "Rel",
+          "type": "string"
+        }
+      },
+      "title": "LinkHeaderPagination",
+      "type": "object"
+    },
+    "LocalFixtureSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "interval_seconds": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Interval Seconds"
+        },
+        "rate_limit_min_interval_seconds": {
+          "default": 0.0,
+          "title": "Rate Limit Min Interval Seconds",
+          "type": "number"
+        },
+        "rate_limit_backoff_multiplier": {
+          "default": 2.0,
+          "title": "Rate Limit Backoff Multiplier",
+          "type": "number"
+        },
+        "ingest_mode": {
+          "default": "polling",
+          "title": "Ingest Mode",
+          "type": "string"
+        },
+        "bypass": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Bypass"
+        },
+        "bypass_config": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Bypass Config",
+          "type": "object"
+        },
+        "type": {
+          "const": "local_fixture",
+          "default": "local_fixture",
+          "title": "Type",
+          "type": "string"
+        },
+        "path": {
+          "minLength": 1,
+          "title": "Path",
+          "type": "string"
+        },
+        "source_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Name"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "title": "LocalFixtureSpec",
+      "type": "object"
+    },
+    "OffsetPagination": {
+      "properties": {
+        "type": {
+          "const": "offset",
+          "default": "offset",
+          "title": "Type",
+          "type": "string"
+        },
+        "offset_param": {
+          "default": "offset",
+          "title": "Offset Param",
+          "type": "string"
+        },
+        "limit_param": {
+          "default": "limit",
+          "title": "Limit Param",
+          "type": "string"
+        },
+        "page_size": {
+          "default": 20,
+          "title": "Page Size",
+          "type": "integer"
+        }
+      },
+      "title": "OffsetPagination",
+      "type": "object"
+    },
+    "RSSFeedSourceSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "interval_seconds": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Interval Seconds"
+        },
+        "rate_limit_min_interval_seconds": {
+          "default": 0.0,
+          "title": "Rate Limit Min Interval Seconds",
+          "type": "number"
+        },
+        "rate_limit_backoff_multiplier": {
+          "default": 2.0,
+          "title": "Rate Limit Backoff Multiplier",
+          "type": "number"
+        },
+        "ingest_mode": {
+          "default": "polling",
+          "title": "Ingest Mode",
+          "type": "string"
+        },
+        "bypass": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Bypass"
+        },
+        "bypass_config": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Bypass Config",
+          "type": "object"
+        },
+        "type": {
+          "const": "rss_feed",
+          "default": "rss_feed",
+          "title": "Type",
+          "type": "string"
+        },
+        "feed_url": {
+          "format": "uri",
+          "minLength": 1,
+          "title": "Feed Url",
+          "type": "string"
+        },
+        "incremental": {
+          "default": true,
+          "title": "Incremental",
+          "type": "boolean"
+        },
+        "source_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Name"
+        }
+      },
+      "required": [
+        "feed_url"
+      ],
+      "title": "RSSFeedSourceSpec",
+      "type": "object"
+    },
+    "RestAPISourceSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "interval_seconds": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Interval Seconds"
+        },
+        "rate_limit_min_interval_seconds": {
+          "default": 0.0,
+          "title": "Rate Limit Min Interval Seconds",
+          "type": "number"
+        },
+        "rate_limit_backoff_multiplier": {
+          "default": 2.0,
+          "title": "Rate Limit Backoff Multiplier",
+          "type": "number"
+        },
+        "ingest_mode": {
+          "default": "polling",
+          "title": "Ingest Mode",
+          "type": "string"
+        },
+        "bypass": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Bypass"
+        },
+        "bypass_config": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Bypass Config",
+          "type": "object"
+        },
+        "type": {
+          "const": "rest_api",
+          "default": "rest_api",
+          "title": "Type",
+          "type": "string"
+        },
+        "base_url": {
+          "format": "uri",
+          "minLength": 1,
+          "title": "Base Url",
+          "type": "string"
+        },
+        "jobs_endpoint": {
+          "title": "Jobs Endpoint",
+          "type": "string"
+        },
+        "pagination": {
+          "anyOf": [
+            {
+              "discriminator": {
+                "mapping": {
+                  "cursor": "#/$defs/CursorPagination",
+                  "link_header": "#/$defs/LinkHeaderPagination",
+                  "offset": "#/$defs/OffsetPagination"
+                },
+                "propertyName": "type"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/CursorPagination"
+                },
+                {
+                  "$ref": "#/$defs/OffsetPagination"
+                },
+                {
+                  "$ref": "#/$defs/LinkHeaderPagination"
+                }
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Pagination"
+        },
+        "field_map": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Field Map",
+          "type": "object"
+        },
+        "headers": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Headers",
+          "type": "object"
+        },
+        "params": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Params",
+          "type": "object"
+        },
+        "incremental_cursor_field": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Incremental Cursor Field"
+        },
+        "source_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Name"
+        },
+        "auth_source_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Auth Source Id"
+        }
+      },
+      "required": [
+        "base_url",
+        "jobs_endpoint"
+      ],
+      "title": "RestAPISourceSpec",
+      "type": "object"
+    },
+    "TelegramChannelSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "interval_seconds": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Interval Seconds"
+        },
+        "rate_limit_min_interval_seconds": {
+          "default": 0.0,
+          "title": "Rate Limit Min Interval Seconds",
+          "type": "number"
+        },
+        "rate_limit_backoff_multiplier": {
+          "default": 2.0,
+          "title": "Rate Limit Backoff Multiplier",
+          "type": "number"
+        },
+        "ingest_mode": {
+          "default": "polling",
+          "title": "Ingest Mode",
+          "type": "string"
+        },
+        "bypass": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Bypass"
+        },
+        "bypass_config": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Bypass Config",
+          "type": "object"
+        },
+        "type": {
+          "const": "telegram_channel",
+          "default": "telegram_channel",
+          "title": "Type",
+          "type": "string"
+        },
+        "entity": {
+          "minLength": 1,
+          "title": "Entity",
+          "type": "string"
+        },
+        "limit": {
+          "default": 100,
+          "exclusiveMinimum": 0,
+          "title": "Limit",
+          "type": "integer"
+        },
+        "auth_source_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Auth Source Id"
+        },
+        "source_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Name"
+        }
+      },
+      "required": [
+        "entity"
+      ],
+      "title": "TelegramChannelSpec",
+      "type": "object"
+    },
+    "TelegramCommentsSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "interval_seconds": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Interval Seconds"
+        },
+        "rate_limit_min_interval_seconds": {
+          "default": 0.0,
+          "title": "Rate Limit Min Interval Seconds",
+          "type": "number"
+        },
+        "rate_limit_backoff_multiplier": {
+          "default": 2.0,
+          "title": "Rate Limit Backoff Multiplier",
+          "type": "number"
+        },
+        "ingest_mode": {
+          "default": "polling",
+          "title": "Ingest Mode",
+          "type": "string"
+        },
+        "bypass": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Bypass"
+        },
+        "bypass_config": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Bypass Config",
+          "type": "object"
+        },
+        "type": {
+          "const": "telegram_comments",
+          "default": "telegram_comments",
+          "title": "Type",
+          "type": "string"
+        },
+        "entity": {
+          "minLength": 1,
+          "title": "Entity",
+          "type": "string"
+        },
+        "post_limit": {
+          "default": 20,
+          "exclusiveMinimum": 0,
+          "title": "Post Limit",
+          "type": "integer"
+        },
+        "comment_limit_per_post": {
+          "default": 50,
+          "exclusiveMinimum": 0,
+          "title": "Comment Limit Per Post",
+          "type": "integer"
+        },
+        "auth_source_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Auth Source Id"
+        },
+        "source_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Name"
+        }
+      },
+      "required": [
+        "entity"
+      ],
+      "title": "TelegramCommentsSpec",
+      "type": "object"
+    },
+    "TelegramGroupSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "interval_seconds": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Interval Seconds"
+        },
+        "rate_limit_min_interval_seconds": {
+          "default": 0.0,
+          "title": "Rate Limit Min Interval Seconds",
+          "type": "number"
+        },
+        "rate_limit_backoff_multiplier": {
+          "default": 2.0,
+          "title": "Rate Limit Backoff Multiplier",
+          "type": "number"
+        },
+        "ingest_mode": {
+          "default": "polling",
+          "title": "Ingest Mode",
+          "type": "string"
+        },
+        "bypass": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Bypass"
+        },
+        "bypass_config": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Bypass Config",
+          "type": "object"
+        },
+        "type": {
+          "const": "telegram_group",
+          "default": "telegram_group",
+          "title": "Type",
+          "type": "string"
+        },
+        "entity": {
+          "minLength": 1,
+          "title": "Entity",
+          "type": "string"
+        },
+        "limit": {
+          "default": 100,
+          "exclusiveMinimum": 0,
+          "title": "Limit",
+          "type": "integer"
+        },
+        "auth_source_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Auth Source Id"
+        },
+        "source_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Name"
+        }
+      },
+      "required": [
+        "entity"
+      ],
+      "title": "TelegramGroupSpec",
+      "type": "object"
+    },
+    "TelegramRealtimeSourceSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "interval_seconds": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Interval Seconds"
+        },
+        "rate_limit_min_interval_seconds": {
+          "default": 0.0,
+          "title": "Rate Limit Min Interval Seconds",
+          "type": "number"
+        },
+        "rate_limit_backoff_multiplier": {
+          "default": 2.0,
+          "title": "Rate Limit Backoff Multiplier",
+          "type": "number"
+        },
+        "ingest_mode": {
+          "default": "polling",
+          "title": "Ingest Mode",
+          "type": "string"
+        },
+        "bypass": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Bypass"
+        },
+        "bypass_config": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Bypass Config",
+          "type": "object"
+        },
+        "type": {
+          "const": "telegram_realtime",
+          "default": "telegram_realtime",
+          "title": "Type",
+          "type": "string"
+        },
+        "entity": {
+          "minLength": 1,
+          "title": "Entity",
+          "type": "string"
+        },
+        "auth_source_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Auth Source Id"
+        },
+        "source_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Name"
+        }
+      },
+      "required": [
+        "entity"
+      ],
+      "title": "TelegramRealtimeSourceSpec",
+      "type": "object"
+    },
+    "WebSocketSourceSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "interval_seconds": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Interval Seconds"
+        },
+        "rate_limit_min_interval_seconds": {
+          "default": 0.0,
+          "title": "Rate Limit Min Interval Seconds",
+          "type": "number"
+        },
+        "rate_limit_backoff_multiplier": {
+          "default": 2.0,
+          "title": "Rate Limit Backoff Multiplier",
+          "type": "number"
+        },
+        "ingest_mode": {
+          "default": "polling",
+          "title": "Ingest Mode",
+          "type": "string"
+        },
+        "bypass": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Bypass"
+        },
+        "bypass_config": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Bypass Config",
+          "type": "object"
+        },
+        "type": {
+          "const": "websocket",
+          "default": "websocket",
+          "title": "Type",
+          "type": "string"
+        },
+        "url": {
+          "minLength": 1,
+          "title": "Url",
+          "type": "string"
+        },
+        "source_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Name"
+        }
+      },
+      "required": [
+        "url"
+      ],
+      "title": "WebSocketSourceSpec",
+      "type": "object"
+    },
+    "WebhookSourceSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "interval_seconds": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Interval Seconds"
+        },
+        "rate_limit_min_interval_seconds": {
+          "default": 0.0,
+          "title": "Rate Limit Min Interval Seconds",
+          "type": "number"
+        },
+        "rate_limit_backoff_multiplier": {
+          "default": 2.0,
+          "title": "Rate Limit Backoff Multiplier",
+          "type": "number"
+        },
+        "ingest_mode": {
+          "default": "polling",
+          "title": "Ingest Mode",
+          "type": "string"
+        },
+        "bypass": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Bypass"
+        },
+        "bypass_config": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Bypass Config",
+          "type": "object"
+        },
+        "type": {
+          "const": "webhook",
+          "default": "webhook",
+          "title": "Type",
+          "type": "string"
+        },
+        "path": {
+          "default": "/webhook",
+          "title": "Path",
+          "type": "string"
+        },
+        "host": {
+          "default": "0.0.0.0",
+          "title": "Host",
+          "type": "string"
+        },
+        "port": {
+          "default": 8080,
+          "title": "Port",
+          "type": "integer"
+        },
+        "source_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Name"
+        }
+      },
+      "title": "WebhookSourceSpec",
+      "type": "object"
+    }
+  },
+  "discriminator": {
+    "mapping": {
+      "browser": "#/$defs/BrowserSourceSpec",
+      "career_site": "#/$defs/CareerSiteSpec",
+      "declarative_html": "#/$defs/DeclarativeHtmlSpec",
+      "lever": "#/$defs/LeverSourceSpec",
+      "local_fixture": "#/$defs/LocalFixtureSpec",
+      "rest_api": "#/$defs/RestAPISourceSpec",
+      "rss_feed": "#/$defs/RSSFeedSourceSpec",
+      "telegram_channel": "#/$defs/TelegramChannelSpec",
+      "telegram_comments": "#/$defs/TelegramCommentsSpec",
+      "telegram_group": "#/$defs/TelegramGroupSpec",
+      "telegram_realtime": "#/$defs/TelegramRealtimeSourceSpec",
+      "webhook": "#/$defs/WebhookSourceSpec",
+      "websocket": "#/$defs/WebSocketSourceSpec"
+    },
+    "propertyName": "type"
+  },
+  "oneOf": [
+    {
+      "$ref": "#/$defs/TelegramChannelSpec"
+    },
+    {
+      "$ref": "#/$defs/TelegramGroupSpec"
+    },
+    {
+      "$ref": "#/$defs/TelegramCommentsSpec"
+    },
+    {
+      "$ref": "#/$defs/DeclarativeHtmlSpec"
+    },
+    {
+      "$ref": "#/$defs/CareerSiteSpec"
+    },
+    {
+      "$ref": "#/$defs/LocalFixtureSpec"
+    },
+    {
+      "$ref": "#/$defs/RestAPISourceSpec"
+    },
+    {
+      "$ref": "#/$defs/BrowserSourceSpec"
+    },
+    {
+      "$ref": "#/$defs/RSSFeedSourceSpec"
+    },
+    {
+      "$ref": "#/$defs/TelegramRealtimeSourceSpec"
+    },
+    {
+      "$ref": "#/$defs/LeverSourceSpec"
+    },
+    {
+      "$ref": "#/$defs/WebhookSourceSpec"
+    },
+    {
+      "$ref": "#/$defs/WebSocketSourceSpec"
+    }
+  ],
+  "$id": "https://job-ftch.dev/schemas/SourceSpec.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

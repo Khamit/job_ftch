@@ -1,0 +1,129 @@
+# Dev stack for the Telegram adapter.
+# Build order:
+#   docker build -f docker/runtime/Dockerfile.dev -t job-ftch-runtime:dev ../../..
+#   docker compose -f job_ftch/adapters/telegram_bot/docker-compose.dev.yml up -d --build
+services:
+  public-api:
+    profiles: ["public-api"]
+    image: job-ftch-telegram-bot:dev
+    build:
+      context: ../../..
+      dockerfile: job_ftch/adapters/telegram_bot/Dockerfile.dev
+      args:
+        BASE_IMAGE: job-ftch-runtime:dev
+    init: true
+    command: ["uvicorn", "job_ftch.adapters.telegram_bot.api:create_app", "--factory", "--host", "0.0.0.0", "--port", "8080"]
+    env_file:
+      - ../../../.env.dev
+      - ./.env.dev
+    environment:
+      JOB_FTCH_ENV: dev
+      JOB_FTCH_RUNTIME_CONFIG_PATH: config/runtime.yaml:config/runtime.dev.yaml:job_ftch/adapters/telegram_bot/runtime.dev.yaml
+      JOB_FTCH_STORE_DSN: postgresql://${POSTGRES_USER:-job_user}:${POSTGRES_PASSWORD:-job_password}@postgres:5432/${POSTGRES_DB:-job_ftch}
+      JOB_FTCH_QDRANT_URL: http://qdrant:6333
+      JOB_FTCH_CONFIGS_DIR: /app/job_ftch/adapters/telegram_bot/config/tenants
+    ports: ["127.0.0.1:8080:8080"]
+    depends_on:
+      postgres: { condition: service_healthy }
+      qdrant: { condition: service_started }
+    extra_hosts: ["host.docker.internal:host-gateway"]
+
+  bot:
+    image: job-ftch-telegram-bot:dev
+    build:
+      context: ../../..
+      dockerfile: job_ftch/adapters/telegram_bot/Dockerfile.dev
+      args:
+        BASE_IMAGE: job-ftch-runtime:dev
+    init: true
+    cap_add:
+      - SYS_PTRACE
+    restart: unless-stopped
+    # Picked up by the autoheal service below: a wedged-but-alive process keeps
+    # PID 1 running, so restart: unless-stopped never fires; autoheal restarts on
+    # the unhealthy healthcheck status instead.
+    labels:
+      - "autoheal=true"
+    env_file:
+      - ../../../.env.dev
+      - ./.env.dev
+    environment:
+      JOB_FTCH_ENV: dev
+      JOB_FTCH_RUNTIME_CONFIG_PATH: config/runtime.yaml:config/runtime.dev.yaml:job_ftch/adapters/telegram_bot/runtime.dev.yaml
+      JOB_FTCH_STORE_DSN: postgresql://${POSTGRES_USER:-job_user}:${POSTGRES_PASSWORD:-job_password}@postgres:5432/${POSTGRES_DB:-job_ftch}
+      JOB_FTCH_QDRANT_URL: http://qdrant:6333
+      JOB_FTCH_CONFIGS_DIR: /app/job_ftch/adapters/telegram_bot/config/tenants
+      HF_HUB_DISABLE_PROGRESS_BARS: "1"
+      HF_HUB_VERBOSITY: error
+      TRANSFORMERS_NO_ADVISORY_WARNINGS: "1"
+      TOKENIZERS_PARALLELISM: "false"
+    healthcheck:
+      # The scheduler refreshes this marker each loop. A stale marker means the
+      # bot may still answer commands while scheduled publishing is dead.
+      test:
+        - CMD-SHELL
+        - >-
+          python -c "import os, time; p='/tmp/job_ftch_bot_ready';
+          raise SystemExit(0 if os.path.exists(p) and time.time() - os.path.getmtime(p) < 180 else 1)"
+      interval: 15s
+      timeout: 3s
+      retries: 3
+      start_period: 180s
+    depends_on:
+      postgres:
+        condition: service_healthy
+      qdrant:
+        condition: service_started
+    volumes:
+      - ../../..:/app
+      - bot_cache:/opt/job-ftch-home/.cache
+      - hf_cache:/opt/job-ftch-home/.cache/huggingface
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    shm_size: "1gb"
+
+  # Restarts containers labelled autoheal=true when their healthcheck reports
+  # unhealthy. Closes the gap where restart: unless-stopped only reacts to a
+  # process exit, not to a hung-but-alive process (see incident 2026-08-04).
+  # Has access to the host docker socket, so the image is pinned by version.
+  autoheal:
+    image: willfarrell/autoheal:1.2.0
+    restart: unless-stopped
+    environment:
+      AUTOHEAL_CONTAINER_LABEL: autoheal
+      AUTOHEAL_INTERVAL: "15"
+      AUTOHEAL_START_PERIOD: "180"
+      AUTOHEAL_DEFAULT_STOP_TIMEOUT: "30"
+      DOCKER_SOCK: /var/run/docker.sock
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-job_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-job_password}
+      POSTGRES_DB: ${POSTGRES_DB:-job_ftch}
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U job_user -d job_ftch"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  qdrant:
+    image: qdrant/qdrant:latest
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - qdrant_data:/qdrant/storage
+
+volumes:
+  pgdata:
+  qdrant_data:
+  bot_cache:
+  hf_cache:

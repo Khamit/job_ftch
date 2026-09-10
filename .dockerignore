@@ -1,0 +1,46 @@
+.env
+.env.*
+.git
+.github
+.codex-backups
+.work
+job_ftch_site
+node_modules
+.next
+.venv
+.venv-*
+.venv-test-core
+.serena
+.hypothesis
+.pytest_cache
+.mypy_cache
+.ruff_cache
+.runtime
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+*.db
+*.session
+*.session-journal
+dist
+build
+artifacts
+results
+scratch
+.benchmarks
+.antigravity-delegations
+
+# Documentation and planning: never read at runtime. fixtures/ is NOT listed here
+# because the runtime loads the derived ontology and generated prompt from it.
+docs
+plans
+
+# Local tooling and report output
+.claude
+.cursorrules
+.repo-safety
+.coverage
+coverage.xml
+*.out
+*.log

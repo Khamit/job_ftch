@@ -2,70 +2,93 @@ name: CI
 
 on:
   push:
-    branches: [main, dev]
+    branches: [main, dev, mvp-release-final]
+  workflow_dispatch:
   pull_request:
     branches: [main, dev]
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  JOB_FTCH_LLM_BACKEND: heuristic
+  JOB_FTCH_TRACING_ENABLED: "false"
 
 jobs:
   lint:
     name: Lint & Format
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
 
       - name: Set up Python + uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
         with:
           python-version: "3.12"
-          enable-cache: true
 
       - name: Install dependencies
-        run: uv sync
+        run: uv sync --all-extras
 
-      - name: Ruff lint
-        run: uv run ruff check .
+      - name: Canonical lint checks
+        run: uv run python scripts/run_ci_checks.py lint
 
-      - name: Ruff format check
-        run: uv run ruff format --check .
+      - name: Legacy import gate
+        run: |
+          if rg -n '^from (domain|application|nodes|sinks|infrastructure|config)\b|^import (domain|application|nodes|sinks|infrastructure|config)\b' . -g '*.py' -g '!job_ftch/**'; then
+            echo "Legacy flat imports remain outside job_ftch/"
+            exit 1
+          fi
+
+      - name: Enforce layer boundaries (no infra imports in domain/application/nodes/sinks)
+        run: |
+          if rg -n '^from job_ftch\.infrastructure|^import job_ftch\.infrastructure' \
+              job_ftch/domain job_ftch/application job_ftch/nodes job_ftch/sinks; then
+            echo "Layer boundary violation: module-level infrastructure import in a pure layer"; exit 1
+          fi
+
 
   type-check:
     name: Type Check
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
 
       - name: Set up Python + uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
         with:
           python-version: "3.12"
-          enable-cache: true
 
       - name: Install dependencies
-        run: uv sync
+        run: uv sync --all-extras
 
-      - name: mypy
-        run: uv run mypy domain application infrastructure nodes sinks config.py
+      - name: Canonical type checks
+        run: uv run python scripts/run_ci_checks.py type
 
   test:
     name: Tests
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
 
       - name: Set up Python + uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
         with:
           python-version: "3.12"
-          enable-cache: true
 
       - name: Install dependencies
-        run: uv sync
+        run: uv sync --all-extras
 
       - name: Run tests
-        run: uv run pytest tests/ --cov --cov-report=xml -v
+        run: |
+          if find tests -maxdepth 1 \( -name 'test_phase*.py' -o -name 'test_3phase*.py' \) -print -quit | grep -q .; then
+            echo 'Legacy chronology-named test files must not return to tests/ root'
+            exit 1
+          fi
+          uv run python scripts/run_ci_checks.py test
 
       - name: Upload coverage
-        uses: codecov/codecov-action@v5
+        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7
         if: always()
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
@@ -75,16 +98,61 @@ jobs:
     name: Security Scan
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
 
       - name: Set up Python + uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
         with:
           python-version: "3.12"
-          enable-cache: true
 
       - name: Install dependencies
-        run: uv sync
+        run: uv sync --all-extras
 
-      - name: Bandit security scan
-        run: uv run bandit -r domain application infrastructure nodes sinks app.py config.py -ll
+      - name: Canonical security checks
+        run: uv run python scripts/run_ci_checks.py security
+
+  core-import-check:
+    name: Core Import Hygiene
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+      - name: Set up Python + uv
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
+        with:
+          python-version: "3.12"
+      - name: Install core package (no extras)
+        run: |
+          uv venv
+          uv pip install .
+      - name: Verify core imports without optional dependencies
+        run: .venv/bin/python scripts/run_ci_checks.py core-import
+
+  release-contract:
+    name: Release Contract
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+      - name: Set up Python + uv
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: uv sync --all-extras
+      - name: Verify graph, eval, and ingest contracts
+        run: uv run python scripts/run_ci_checks.py release-contract
+
+  browser-smoke:
+    name: Browser Runtime Smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+      - name: Set up Python + uv
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: uv sync --all-extras
+      - name: Install Chromium runtime
+        run: uv run patchright install chromium
+      - name: Launch and close Chromium
+        run: uv run python scripts/browser_smoke.py

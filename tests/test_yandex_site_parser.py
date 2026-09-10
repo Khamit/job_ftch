@@ -1,0 +1,255 @@
+from __future__ import annotations
+
+import pytest
+
+from job_ftch.domain.source_spec import CareerSiteSpec
+from job_ftch.infrastructure.sources.site_parsers.yandex import (
+    YandexJobsParser,
+    _extract_ssr_vacancy_urls,
+    _item_from_api,
+    _item_from_detail_html,
+)
+
+
+class _FakeResponse:
+    def __init__(
+        self,
+        text: str,
+        url: str,
+        status_code: int = 200,
+        payload: dict[str, object] | None = None,
+    ) -> None:
+        self.text = text
+        self.url = url
+        self.status_code = status_code
+        self._payload = payload
+
+    def raise_for_status(self) -> None:
+        if self.status_code >= 400:
+            raise RuntimeError(f"http {self.status_code}")
+
+    def json(self) -> dict[str, object]:
+        if self._payload is None:
+            raise RuntimeError("not json")
+        return self._payload
+
+
+class _FakeClient:
+    def __init__(self, responses: dict[str, _FakeResponse]) -> None:
+        self._responses = responses
+
+    async def get(self, url: str, *, follow_redirects: bool = True) -> _FakeResponse:
+        del follow_redirects
+        return self._responses[url]
+
+
+def test_extract_ssr_vacancy_urls_skips_city_filters() -> None:
+    html = """
+    <a href="/jobs/vacancies/data-analyst-123">Vacancy</a>
+    <a href="/jobs/vacancies/city_moscow">City</a>
+    <a href="/jobs/vacancies/ml-engineer-456">Vacancy 2</a>
+    """
+
+    urls = _extract_ssr_vacancy_urls(html, "https://yandex.ru/jobs/vacancies?text=ai", limit=10)
+
+    assert urls == [
+        "https://yandex.ru/jobs/vacancies/data-analyst-123",
+        "https://yandex.ru/jobs/vacancies/ml-engineer-456",
+    ]
+
+
+def test_item_from_detail_html_uses_visible_main_content() -> None:
+    html = """
+    <main>
+      <h1>ML Engineer</h1>
+      <div>От 3 лет</div>
+      <div>Удалённая работа</div>
+      <p>Развивать модели ранжирования и инфраструктуру качества.</p>
+    </main>
+    """
+
+    item = _item_from_detail_html(
+        "https://yandex.ru/jobs/vacancies/ml-engineer-456",
+        html,
+        "yandex_jobs_ru",
+    )
+
+    assert item is not None
+    assert item.external_id == "456"
+    assert "ML Engineer" in item.text
+    assert "Удалённая работа" in item.text
+
+
+def test_item_from_api_resolves_slug_against_listing_origin() -> None:
+    item = _item_from_api(
+        {
+            "id": 456,
+            "title": "ML Engineer",
+            "publication_slug_url": "/jobs/vacancies/ml-engineer-456",
+        },
+        "https://yandex.ru/jobs/vacancies?text=ai",
+        "yandex_jobs_ru",
+    )
+
+    assert item is not None
+    assert str(item.url) == "https://yandex.ru/jobs/vacancies/ml-engineer-456"
+
+
+def test_yandex_parser_rejects_career_consultation_as_vacancy() -> None:
+    assert (
+        _item_from_api(
+            {
+                "id": 999,
+                "title": "Карьерные консультации от рекрутеров Яндекса",
+                "publication_slug_url": "/jobs/vacancies/career-consultation-999",
+            },
+            "https://yandex.ru/jobs/vacancies",
+            "yandex_jobs_ru",
+        )
+        is None
+    )
+    assert (
+        _item_from_detail_html(
+            "https://yandex.ru/jobs/vacancies/career-consultation-999",
+            "<main><h1>Карьерные консультации от рекрутеров Яндекса</h1></main>",
+            "yandex_jobs_ru",
+        )
+        is None
+    )
+
+
+@pytest.mark.asyncio
+async def test_yandex_parser_prefers_ssr_listing_path() -> None:
+    listing_html = """
+    <a href="/jobs/vacancies/data-analyst-123">Vacancy</a>
+    <a href="/jobs/vacancies/city_moscow">Filter</a>
+    """
+    detail_html = """
+    <main>
+      <h1>Data Analyst</h1>
+      <p>Анализировать данные и улучшать ML-продукты.</p>
+    </main>
+    """
+    parser = YandexJobsParser()
+    client = _FakeClient(
+        {
+            "https://yandex.ru/jobs/vacancies?text=ai": _FakeResponse(
+                listing_html,
+                "https://yandex.ru/jobs/vacancies?text=ai",
+            ),
+            "https://yandex.ru/jobs/vacancies/data-analyst-123": _FakeResponse(
+                detail_html,
+                "https://yandex.ru/jobs/vacancies/data-analyst-123",
+            ),
+        }
+    )
+    spec = CareerSiteSpec(
+        url="https://yandex.ru/jobs/vacancies?text=ai",
+        source_name="yandex_jobs_ru",
+        limit=1,
+    )
+
+    items = [item async for item in parser.parse(spec, client)]
+
+    assert len(items) == 1
+    assert items[0].external_id == "123"
+    assert "Data Analyst" in items[0].text
+
+
+@pytest.mark.asyncio
+async def test_yandex_parser_normalizes_jobs_root_to_vacancy_listing() -> None:
+    listing_html = '<a href="/jobs/vacancies/data-analyst-123">Vacancy</a>'
+    detail_html = "<main><h1>Data Analyst</h1></main>"
+    parser = YandexJobsParser()
+    client = _FakeClient(
+        {
+            "https://yandex.ru/jobs/vacancies": _FakeResponse(
+                listing_html, "https://yandex.ru/jobs/vacancies"
+            ),
+            "https://yandex.ru/jobs/vacancies/data-analyst-123": _FakeResponse(
+                detail_html, "https://yandex.ru/jobs/vacancies/data-analyst-123"
+            ),
+        }
+    )
+
+    items = [
+        item
+        async for item in parser.parse(
+            CareerSiteSpec(url="https://www.yandex.ru/jobs/", limit=1), client
+        )
+    ]
+
+    assert len(items) == 1
+    assert str(items[0].url) == "https://yandex.ru/jobs/vacancies/data-analyst-123"
+
+
+@pytest.mark.asyncio
+async def test_yandex_parser_prefers_http_publications_api() -> None:
+    parser = YandexJobsParser()
+    client = _FakeClient(
+        {
+            "https://yandex.ru/jobs/api/publications?page_size=2&text=LLM": _FakeResponse(
+                "",
+                "https://yandex.ru/jobs/api/publications?page_size=2&text=LLM",
+                payload={
+                    "results": [
+                        {
+                            "id": 15322,
+                            "title": "Старший LLM-разработчик",
+                            "publication_slug_url": "/jobs/vacancies/llm-dev-15322",
+                        }
+                    ]
+                },
+            )
+        }
+    )
+    items = [
+        item
+        async for item in parser.parse(
+            CareerSiteSpec(
+                url="https://yandex.ru/jobs/vacancies?text=LLM",
+                source_name="yandex_jobs",
+                limit=2,
+            ),
+            client,
+        )
+    ]
+    assert len(items) == 1
+    assert items[0].external_id == "15322"
+    assert "LLM" in items[0].text
+
+
+@pytest.mark.asyncio
+async def test_yandex_parser_passes_runtime_search_keywords_to_api() -> None:
+    parser = YandexJobsParser()
+    client = _FakeClient(
+        {
+            "https://yandex.ru/jobs/api/publications?page_size=1&text=LLM+Engineer": _FakeResponse(
+                "",
+                "https://yandex.ru/jobs/api/publications?page_size=1&text=LLM+Engineer",
+                payload={
+                    "results": [
+                        {
+                            "id": 42,
+                            "title": "LLM Engineer",
+                            "publication_slug_url": "/jobs/vacancies/llm-engineer-42",
+                        }
+                    ]
+                },
+            )
+        }
+    )
+
+    items = [
+        item
+        async for item in parser.parse(
+            CareerSiteSpec(
+                url="https://yandex.ru/jobs/vacancies",
+                limit=1,
+                monitor_config={"_search_keywords": ["LLM Engineer"]},
+            ),
+            client,
+        )
+    ]
+
+    assert [item.external_id for item in items] == ["42"]

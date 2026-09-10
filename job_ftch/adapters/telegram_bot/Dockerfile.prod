@@ -1,0 +1,14 @@
+ARG BASE_IMAGE=job-ftch-runtime:prod
+FROM ${BASE_IMAGE}
+
+WORKDIR /app
+
+# Bake the current source over the runtime base so standalone production images
+# execute the exact adapter revision that was built.
+COPY --chown=appuser:appuser . /app
+
+USER appuser
+
+ENV PATH="/app/.venv/bin:$PATH" PYTHONPATH=/app \
+    JOB_FTCH_CONFIGS_DIR=/app/job_ftch/adapters/telegram_bot/config/tenants
+CMD ["xvfb-run", "-a", "job_ftch", "telegram-bot"]

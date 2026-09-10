@@ -1,0 +1,310 @@
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any
+
+import pytest
+
+from job_ftch.application import (
+    LLMProvider,
+    ProcessingNode,
+    SanitizingNode,
+    Sink,
+    Source,
+    Stage,
+    Store,
+)
+from job_ftch.application.contracts import DedupReservation
+from job_ftch.domain import (
+    DedupKeyKind,
+    DuplicateRecord,
+    DuplicateRejectionReason,
+    RawItem,
+    RememberedDedupKey,
+    SourceKind,
+)
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
+
+    from job_ftch.domain import ObservationLedgerEntry, OutboxRecord
+    from job_ftch.domain.source_assessment import SourceAssessmentResult, SourceIngestState
+
+
+class MinimalSource:
+    def fetch(self) -> AsyncIterator[RawItem]:
+        async def _items() -> AsyncIterator[RawItem]:
+            yield RawItem(
+                source_kind=SourceKind.DEBUG,
+                source_name="contract",
+                external_id="1",
+                text="contract item",
+            )
+
+        return _items()
+
+
+class MinimalSanitizeNode:
+    async def process(self, item: RawItem) -> RawItem | None:
+        return item
+
+
+class MinimalProcessingNode:
+    async def process(self, item: RawItem) -> RawItem | None:
+        return item
+
+
+class MinimalSink:
+    def __init__(self) -> None:
+        self.items: list[RawItem] = []
+
+    async def emit(self, item: RawItem) -> None:
+        self.items.append(item)
+
+
+class MinimalStore:
+    def __init__(self) -> None:
+        self._processed: set[str] = set()
+        self._dedup: dict[str, RememberedDedupKey] = {}
+        self._duplicates: list[DuplicateRecord] = []
+        self._state: dict[str, str] = {}
+
+    async def enqueue_outbox(self, record: OutboxRecord) -> OutboxRecord:
+        return record
+
+    async def list_pending_outbox(self, limit: int = 100) -> tuple[OutboxRecord, ...]:
+        del limit
+        return ()
+
+    async def mark_outbox_delivered(self, idempotency_key: str) -> OutboxRecord | None:
+        del idempotency_key
+        return None
+
+    async def acquire_dedup_claim(self, key: str, owner_id: str, *, ttl_seconds: int) -> bool:
+        del key, owner_id, ttl_seconds
+        return True
+
+    async def release_dedup_claim(self, key: str, owner_id: str) -> None:
+        del key, owner_id
+
+    async def compare_and_reserve(
+        self, keys: tuple[str, ...], owner_id: str, *, ttl_seconds: int
+    ) -> DedupReservation:
+        del owner_id, ttl_seconds
+        return DedupReservation(acquired=True, reserved_keys=keys)
+
+    async def record_observation(self, entry: ObservationLedgerEntry) -> ObservationLedgerEntry:
+        return entry
+
+    async def get_observation(
+        self, stable_id: str, content_hash: str, *, tenant_id: str = "default"
+    ) -> ObservationLedgerEntry | None:
+        del stable_id, content_hash, tenant_id
+        return None
+
+    async def has_processed(self, item_id: str) -> bool:
+        return item_id in self._processed
+
+    async def mark_processed(self, item_id: str) -> None:
+        self._processed.add(item_id)
+
+    async def has_dedup_key(self, key: str) -> bool:
+        return key in self._dedup
+
+    async def remember_dedup_key(self, record: RememberedDedupKey) -> None:
+        self._dedup[record.key] = record
+
+    async def get_dedup_key(self, key: str) -> RememberedDedupKey | None:
+        return self._dedup.get(key)
+
+    async def list_dedup_keys(self, kind: str | None = None) -> tuple[RememberedDedupKey, ...]:
+        values = tuple(self._dedup.values())
+        if kind is None:
+            return values
+        return tuple(record for record in values if record.kind.value == kind)
+
+    async def record_duplicate(self, record: DuplicateRecord) -> None:
+        self._duplicates.append(record)
+
+    async def list_duplicate_records(self) -> tuple[DuplicateRecord, ...]:
+        return tuple(self._duplicates)
+
+    async def get_run_state(
+        self,
+        key: str,
+        *,
+        source_kind: str | None = None,
+        source_name: str | None = None,
+    ) -> str | None:
+        actual_key = key
+        if source_kind and source_name:
+            actual_key = f"{source_kind}:{source_name}:{key}"
+        return self._state.get(actual_key)
+
+    async def set_run_state(
+        self,
+        key: str,
+        value: str,
+        *,
+        source_kind: str | None = None,
+        source_name: str | None = None,
+    ) -> None:
+        actual_key = key
+        if source_kind and source_name:
+            actual_key = f"{source_kind}:{source_name}:{key}"
+        self._state[actual_key] = value
+
+    async def get_source_strategy(self, domain: str) -> dict[str, str] | None:
+        return None
+
+    async def save_source_strategy(self, domain: str, monitor: str, bypass: str) -> None:
+        pass
+
+    # ADR-031: source snapshot methods
+    async def get_last_run_snapshot(
+        self,
+        tenant_id: str,
+        source_id: str,
+    ) -> frozenset[str]:
+        return frozenset()
+
+    async def get_last_run_snapshot_hashes(
+        self,
+        tenant_id: str,
+        source_id: str,
+    ) -> dict[str, str]:
+        del tenant_id, source_id
+        return {}
+
+    async def save_snapshot_rows(
+        self,
+        tenant_id: str,
+        source_id: str,
+        run_id: str,
+        rows: tuple[tuple[str, str, str], ...],
+    ) -> None:
+        return None
+
+    async def purge_old_snapshots(
+        self,
+        tenant_id: str,
+        source_id: str,
+        *,
+        older_than_days: int,
+    ) -> int:
+        return 0
+
+    async def get_source_assessment(
+        self,
+        tenant_id: str,
+        source_id: str,
+    ) -> SourceAssessmentResult | None:
+        return None
+
+    async def save_source_assessment(
+        self,
+        tenant_id: str,
+        result: SourceAssessmentResult,
+    ) -> None:
+        return None
+
+    async def get_source_ingest_state(
+        self,
+        tenant_id: str,
+        source_id: str,
+    ) -> SourceIngestState | None:
+        return None
+
+    async def save_source_ingest_state(
+        self,
+        tenant_id: str,
+        state: SourceIngestState,
+    ) -> None:
+        return None
+
+    async def get_source_operator_flag(self, tenant_id: str, source_key: str) -> None:
+        del tenant_id, source_key
+        return None
+
+    async def set_source_operator_flag(self, tenant_id: str, flag: object) -> None:
+        del tenant_id, flag
+
+    async def list_source_operator_flags(self, tenant_id: str) -> tuple[()]:
+        del tenant_id
+        return ()
+
+    async def save_pipeline_run_stats(self, tenant_id: str, row: object) -> None:
+        del tenant_id, row
+
+    async def save_source_run_stats(self, tenant_id: str, rows: object) -> None:
+        del tenant_id, rows
+
+
+class MinimalLLMProvider:
+    async def extract(self, text: str, schema: type[Any]) -> Any:
+        return schema(text=text)
+
+    async def classify(self, prompt: str, schema: type[Any]) -> Any:
+        return schema(prompt=prompt)
+
+    async def present(self, job_payload: str, schema: type[Any]) -> Any:
+        return schema(job=job_payload)
+
+    async def generate_text(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        *,
+        temperature: float = 0.2,
+    ) -> str:
+        return f"{system_prompt}\n{user_prompt}\n{temperature}"
+
+
+def test_protocol_contracts_runtime_checkable() -> None:
+    assert isinstance(MinimalSource(), Source)
+    assert isinstance(MinimalSanitizeNode(), Stage)
+    assert isinstance(MinimalSanitizeNode(), SanitizingNode)
+    assert isinstance(MinimalProcessingNode(), ProcessingNode)
+    assert isinstance(MinimalSink(), Sink)
+    assert isinstance(MinimalStore(), Store)
+    assert isinstance(MinimalLLMProvider(), LLMProvider)
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_minimal_store_implements_namespaced_run_state() -> None:
+    store = MinimalStore()
+    await store.set_run_state("cursor", "123", source_kind="tg", source_name="chan")
+    assert await store.get_run_state("cursor", source_kind="tg", source_name="chan") == "123"
+    assert await store.get_run_state("cursor") is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_minimal_store_supports_dedup_records() -> None:
+    store = MinimalStore()
+    record = RememberedDedupKey(
+        key="content:test",
+        kind=DedupKeyKind.CONTENT,
+        item_id="item-1",
+        source_kind=SourceKind.DEBUG,
+        source_name="debug",
+    )
+    duplicate = DuplicateRecord(
+        item_id="item-2",
+        source_kind=SourceKind.DEBUG,
+        source_name="debug",
+        reason=DuplicateRejectionReason.DUPLICATE_CONTENT,
+        duplicate_key="content:test",
+        matched_key="content:test",
+        matched_item_id="item-1",
+        matched_source_kind=SourceKind.DEBUG,
+        matched_source_name="debug",
+        details="duplicate",
+    )
+
+    await store.remember_dedup_key(record)
+    await store.record_duplicate(duplicate)
+
+    assert await store.has_dedup_key("content:test") is True
+    assert await store.list_dedup_keys(DedupKeyKind.CONTENT.value) == (record,)
+    assert await store.list_duplicate_records() == (duplicate,)
